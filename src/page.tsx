@@ -3,9 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCatFactStore } from "./useCatFactStore";
 
 export function Page() {
-  const queryClient = useQueryClient();
   const catFact = useCatFactStore((state) => state.fact);
-  console.log("🚀 ~ App ~ catFacts:", catFact);
+  const queryClient = useQueryClient();
   return (
     <>
       <div>

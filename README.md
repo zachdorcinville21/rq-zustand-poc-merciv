@@ -1,54 +1,174 @@
-# React + TypeScript + Vite
+## React Query and Zustand POC
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This poc demonstrates how react query can be used alone or with zustand. The following sections demonstrates each strategy.
 
-Currently, two official plugins are available:
+### React Query only
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+With this approach, we can create a hook to fetch some data, then declaratively refetch as we wish. Here's an example of the hook:
 
-## Expanding the ESLint configuration
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { useCatFactStore } from "./useCatFactStore";
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
+export const useCatFact = () => {
+  return useQuery({
+    queryKey: ["cat-facts"],
+    queryFn: async () => {
+      const response = await fetch("https://catfact.ninja/fact");
+      if (!response.ok) {
+        throw new Error("Network response was not ok");
+      }
+      const data = await response.json();
+      return data.fact;
     },
-  },
-})
+    staleTime: Infinity,
+  });
+};
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+At the component level, we have this:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```tsx
+import { useCatFact } from "./useCatFact";
+import { Link } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
 
-export default tseslint.config({
-  plugins: {
-    // Add the react-x and react-dom plugins
-    'react-x': reactX,
-    'react-dom': reactDom,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended typescript rules
-    ...reactX.configs['recommended-typescript'].rules,
-    ...reactDom.configs.recommended.rules,
-  },
-})
+export function Page() {
+  const { data: catFact } = useCatFact();
+  const queryClient = useQueryClient();
+  return (
+    <>
+      <div>
+        <h1>Cat Facts</h1>
+        <Link href="/page2">Go to Page 2</Link>
+        <button
+          onClick={() =>
+            queryClient.invalidateQueries({ queryKey: ["cat-facts"] })
+          }
+          style={{ marginLeft: "20px" }}
+        >
+          Invalidate query and update store
+        </button>
+      </div>
+      <div>
+        <div>
+          <h2>{catFact}</h2>
+        </div>
+      </div>
+    </>
+  );
+}
 ```
+
+With this hook, the data will only refetch when:
+- We call `queryClient.invalidateQueries`
+- The `queryKey` changes
+
+In any other case, when this hook is invoked, the data will be pulled from an in-memory cache rather than triggering a new network request. This can be useful for us, for example our `GetWorkspaces` request, where the list of workspaces does not need to be refetched unless a new one is created or one of them is updated.
+
+At the component level, when we click the button, we declaratively invalidate the query, which triggers a new network request.
+
+
+### React query and Zustand
+
+With this approach, we can utilize both react query and zustand to fetch and store data. Here is the zustand store we're working with:
+
+```ts
+import { create } from "zustand";
+
+interface CatFactStore {
+  fact: string;
+  setFact: (newFact: string) => void;
+}
+
+export const useCatFactStore = create<CatFactStore>((set) => ({
+  fact: "",
+  setFact: (newFact: string) => set({ fact: newFact }),
+}));
+```
+
+The react query hook:
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { useCatFactStore } from "./useCatFactStore";
+
+export const useCatFact = () => {
+  const setFact = useCatFactStore((state) => state.setFact);
+
+  return useQuery({
+    queryKey: ["cat-facts"],
+    queryFn: async () => {
+      const response = await fetch("https://catfact.ninja/fact");
+      if (!response.ok) {
+        throw new Error("Network response was not ok");
+      }
+      const data = await response.json();
+      setFact(data.fact);
+      return data.fact;
+    },
+    staleTime: Infinity,
+  });
+};
+```
+And finally the components:
+
+#### page.tsx
+```tsx
+import { Link } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
+import { useCatFactStore } from "./useCatFactStore";
+
+export function Page() {
+  const catFact = useCatFactStore((state) => state.fact);
+  const queryClient = useQueryClient();
+  return (
+    <>
+      <div>
+        <h1>Cat Facts</h1>
+        <Link href="/page2">Go to Page 2</Link>
+        <button
+          onClick={() =>
+            queryClient.invalidateQueries({ queryKey: ["cat-facts"] })
+          }
+          style={{ marginLeft: "20px" }}
+        >
+          Invalidate query and update store
+        </button>
+      </div>
+      <div>
+        <div>
+          <h2>{catFact}</h2>
+        </div>
+      </div>
+    </>
+  );
+}
+```
+
+#### App.tsx
+```tsx
+import "./App.css";
+import { Route, Switch } from "wouter";
+import { Page } from "./page";
+import Page2 from "./page2";
+import { useCatFact } from "./useCatFact";
+
+function App() {
+  useCatFact();
+  return (
+    <>
+      <Switch>
+        <Route path="/" component={Page} />
+        <Route path="/page2" component={Page2} />
+        <Route>404: No such page!</Route>
+      </Switch>
+    </>
+  );
+}
+
+export default App;
+```
+
+In the react query hook, we can update the zustand store with the result from the network request. This way, whenever a component invokes the zustand hook, it will have the latest data. We call the react query hook `useCatFact` at the root level so we can execute the request on mount to then update our store.
+
+We have the same functionality as before with `invalidateQueries`—when we click the button, react query will execute the network request again and update the zustand store.
