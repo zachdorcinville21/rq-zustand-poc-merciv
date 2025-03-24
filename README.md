@@ -172,3 +172,33 @@ export default App;
 In the react query hook, we can update the zustand store with the result from the network request. This way, whenever a component invokes the zustand hook, it will have the latest data. We call the react query hook `useCatFact` at the root level so we can execute the request on mount to then update our store.
 
 We have the same functionality as before with `invalidateQueries`—when we click the button, react query will execute the network request again and update the zustand store.
+
+
+### Normalization
+If we want to store a transformed version of data coming from an API, we can use the `select` property which can be passed to `useQuery`. This can be used in any of the approaches. Example:
+
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { useCatFactStore } from "./useCatFactStore";
+
+export const useCatFact = () => {
+  const setFact = useCatFactStore((state) => state.setFact);
+
+  return useQuery({
+    queryKey: ["cat-facts"],
+    queryFn: async () => {
+      const response = await fetch("https://catfact.ninja/fact");
+      if (!response.ok) {
+        throw new Error("Network response was not ok");
+      }
+      const data = await response.json();
+      setFact(data.fact);
+      return data.fact;
+    },
+    select: data => {
+      return data.slice(0, 4);
+    }
+    staleTime: Infinity,
+  });
+};
+```
